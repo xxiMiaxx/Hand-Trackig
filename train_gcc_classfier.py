@@ -1,0 +1,201 @@
+# USAGE
+
+
+# import the necessary packages tf 1.14 - keras 
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import AveragePooling2D
+from tensorflow.keras.layers import Dropout
+from tensorflow.keras.layers import Flatten
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Input
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.preprocessing.image import load_img
+from tensorflow.keras.utils import to_categorical
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+from imutils import paths
+import matplotlib.pyplot as plt
+import numpy as np
+import argparse
+import os
+import tensorflow as tf
+from tensorflow import keras
+#First good traind model : plate_type.h5
+# SECOND: plate_2type.h5
+# GPU FIRST TIME TRAINED : PLATE_3TYPE
+#Gpu second training plate_20K_type
+# construct the argument parser and parse the arguments
+
+ap = argparse.ArgumentParser()
+#ap.add_argument("-d", "--dataset", required=True,
+#	help="/home/lamia/Documents/dd")
+ap.add_argument("-p", "--plot", type=str, default="plot.png",
+	help="b")
+ap.add_argument("-m", "--model", type=str,
+	default="plate_bigDS_type.h5",
+	help="/home/lamia/Documents/plate_bigDS_type.h5")
+args = vars(ap.parse_args())
+
+# initialize the initial learning rate, number of epochs to train for,
+# and batch size
+INIT_LR = 0.001 #0.0001
+EPOCHS = 10 #50 >100
+BS = 16 # 16 > 48
+#++++++++++++++++++++++++++++++hf5 test+++++++++++++++++++++++++
+dataset = tf.keras.preprocessing.image_dataset_from_directory(
+   "/home/lamia/Documents/dd",
+    labels="inferred",
+    label_mode="categorical",
+    class_names=["gcc","saudi"],
+    color_mode="rgb",
+    batch_size=32,
+    image_size=(224, 224),
+    shuffle=True,
+    seed=None,
+    validation_split=None,
+    subset=None,
+    interpolation="bilinear",
+    follow_links=False,
+)
+print(dataset)
+# create a data generator
+datagen = ImageDataGenerator()
+# load and iterate training dataset
+train_it = datagen.flow_from_directory("/home/lamia/Documents/dd", class_mode='binary', batch_size=64)
+
+
+
+
+#++++++++++++++++++++++++++++++end++++++++++++++++++++++++++++++
+# grab the list of images in our dataset directory, then initialize
+# the list of data (i.e., images) and class images
+print("[INFO] loading images...")
+#imagePaths = list(paths.list_images("/home/lamia/Documents/dd"))
+data = []
+labels = []
+#########################################################
+DIRECTORY = "/home/lamia/Documents/"
+CATEGORIES = ["gcc", "saudi"]
+##################################################################
+# loop over the image paths
+
+##################################################################
+#for category in CATEGORIES:
+  #  path = os.path.join(DIRECTORY, category)
+    ##################################################################
+    #for imagePath in imagePaths:
+ #   for img in os.listdir(path):
+    	# extract the class label from the filename
+    	#label = imagePath.split(os.path.sep)[-2]
+    
+    	# load the input image (224x224) and preprocess it
+        # original target_size=(224, 224)
+      #  img_path = os.path.join(path, img)
+       # image = load_img(img_path, target_size=(224, 224)) #make less -experiment 64, 128- adam 
+        #image = img_to_array(image)
+        #image = preprocess_input(image)
+    
+    	# update the data and labels lists, respectively
+       # data.append(image)
+        #labels.append(label)
+       # labels.append(category)
+    
+    
+
+# perform one-hot encoding on the labels
+lb = LabelBinarizer()
+labels = lb.fit_transform(labels)
+labels = to_categorical(labels)
+
+# convert the data and labels to NumPy arrays
+data = np.array(data, dtype="float32")
+labels = np.array(labels)
+
+# partition the data into training and testing splits using 75% of
+# the data for training and the remaining 25% for testing
+(trainX, testX, trainY, testY) = train_test_split(data, labels,
+	test_size=0.20, stratify=labels, random_state=42)
+
+# construct the training image generator for data augmentation
+aug = ImageDataGenerator(
+	rotation_range=20,
+	zoom_range=0.15,
+	width_shift_range=0.2,
+	height_shift_range=0.2,
+	shear_range=0.15,
+	horizontal_flip=True,
+	fill_mode="nearest")
+
+# load the MobileNetV2 network, ensuring the head FC layer sets are
+# left off
+baseModel = MobileNetV2(weights="imagenet", include_top=False,
+	input_tensor=Input(shape=(224, 224, 3)))
+
+# construct the head of the model that will be placed on top of the
+# the base model
+headModel = baseModel.output
+headModel = AveragePooling2D(pool_size=(7,7))(headModel)
+headModel = Flatten(name="flatten")(headModel)
+headModel = Dense(128, activation="relu")(headModel)
+headModel = Dropout(0.2)(headModel)
+headModel = Dense(2, activation="softmax")(headModel)
+
+# place the head FC model on top of the base model (this will become
+# the actual model we will train)
+model = Model(inputs=baseModel.input, outputs=headModel)
+
+# loop over all layers in the base model and freeze them so they will
+# *not* be updated during the first training process
+for layer in baseModel.layers:
+	layer.trainable = False
+
+# compile our model
+print("[INFO] compiling model...")
+opt = Adam(lr=INIT_LR, decay=INIT_LR / EPOCHS)
+model.compile(loss="binary_crossentropy", optimizer=opt,
+	metrics=["accuracy"])
+
+# train the head of the network
+print("[INFO] training head...")
+H = model.fit(
+	aug.flow(trainX, trainY, batch_size=BS),
+	steps_per_epoch=len(trainX) // BS,
+	validation_data=(testX, testY),
+	validation_steps=len(testX) // BS,
+	epochs=EPOCHS)
+
+# make predictions on the testing set
+print("[INFO] evaluating network...")
+predIdxs = model.predict(testX, batch_size=BS)
+
+# for each image in the testing set we need to find the index of the
+# label with corresponding largest predicted probability
+predIdxs = np.argmax(predIdxs, axis=1)
+
+# show a nicely formatted classification report
+print(classification_report(testY.argmax(axis=1), predIdxs,
+	target_names=lb.classes_))
+
+# serialize the model to disk
+print("[INFO] saving the classfier...")
+model.save(args["model"], save_format="h5")
+
+# plot the training loss and accuracy
+N = EPOCHS
+#plt.style.use("ggplot")
+#plt.figure()
+#plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+#plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+#plt.plot(np.arange(0, N), H.history["acc"], label="train_acc")
+#plt.plot(np.arange(0, N), H.history["val_acc"], label="val_acc")
+#plt.title("Training Loss and Accuracy")
+#plt.xlabel("Epoch #")
+#plt.ylabel("Loss/Accuracy")
+#plt.legend(loc="lower left")
+#plt.savefig(args["plot"])
