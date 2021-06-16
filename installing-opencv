@@ -1,0 +1,7 @@
+apt-get update
+apt-get install -y libglib2.0.0 libsm6
+apt-get install libxext6
+apt-get install -y libxrender-dev
+2: Install OpenCV on python3.x:
+
+pip3 install opencv-contrib-python
